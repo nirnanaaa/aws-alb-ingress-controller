@@ -32,6 +32,7 @@ import (
 // EndpointResolver resolves the endpoints for specific ingress backend
 type EndpointResolver interface {
 	Resolve(*extensions.Ingress, *extensions.IngressBackend, string) ([]*elbv2.TargetDescription, error)
+	ReverseResolve(*extensions.Ingress, *extensions.IngressBackend, []*elbv2.TargetDescription) ([]*corev1.Pod, error)
 }
 
 // NewEndpointResolver constructs a new EndpointResolver
@@ -52,6 +53,52 @@ func (resolver *endpointResolver) Resolve(ingress *extensions.Ingress, backend *
 		return resolver.resolveInstance(ingress, backend)
 	}
 	return resolver.resolveIP(ingress, backend)
+}
+
+// For each item in the targets slice, returns the corresponding pod in the result slice at the same index. The result slice is exactly as long as the input slice.
+func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, backend *extensions.IngressBackend, targets []*elbv2.TargetDescription) ([]*corev1.Pod, error) {
+	service, servicePort, err := findServiceAndPort(resolver.store, ingress.Namespace, backend.ServiceName, backend.ServicePort)
+	if err != nil {
+		return nil, err
+	}
+	serviceKey := ingress.Namespace + "/" + service.Name
+	eps, err := resolver.store.GetServiceEndpoints(serviceKey)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to find service endpoints for %s: %v", serviceKey, err.Error())
+	}
+
+	var podMap map[string]*corev1.Pod
+	pods := resolver.store.GetServicePods(service.Spec.Selector)
+	for _, pod := range pods {
+		podMap[pod.Name] = pod
+	}
+
+	result := make([]*corev1.Pod, len(targets))
+	for _, epSubset := range eps.Subsets {
+		for _, epPort := range epSubset.Ports {
+			// servicePort.Name is optional if there is only one port
+			if servicePort.Name != "" && servicePort.Name != epPort.Name {
+				continue
+			}
+			for _, epAddr := range append(epSubset.Addresses, epSubset.NotReadyAddresses...) {
+				if epAddr.TargetRef == nil || epAddr.TargetRef.APIVersion != "v1" || epAddr.TargetRef.Kind != "Pod" {
+					continue
+				}
+
+				pod, ok := podMap[epAddr.TargetRef.Name]
+				if !ok {
+					continue
+				}
+
+				for i, target := range targets {
+					if *target.Id == pod.Status.PodIP {
+						result[i] = pod
+					}
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 func (resolver *endpointResolver) resolveInstance(ingress *extensions.Ingress, backend *extensions.IngressBackend) ([]*elbv2.TargetDescription, error) {

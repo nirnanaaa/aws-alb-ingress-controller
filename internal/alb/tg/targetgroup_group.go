@@ -14,6 +14,7 @@ import (
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // GroupController manages all target groups for one ingress.
@@ -34,8 +35,9 @@ func NewGroupController(
 	store store.Storer,
 	nameTagGen NameTagGenerator,
 	tagsController tags.Controller,
-	endpointResolver backend.EndpointResolver) GroupController {
-	tgController := NewController(cloud, store, nameTagGen, tagsController, endpointResolver)
+	endpointResolver backend.EndpointResolver,
+	client client.Client) GroupController {
+	tgController := NewController(cloud, store, nameTagGen, tagsController, endpointResolver, client)
 	return &defaultGroupController{
 		cloud:        cloud,
 		nameTagGen:   nameTagGen,

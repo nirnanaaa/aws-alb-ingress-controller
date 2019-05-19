@@ -19,6 +19,7 @@ import (
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // The port used when creating targetGroup serves as a default value for targets registered without port specified.
@@ -34,9 +35,9 @@ type Controller interface {
 	Reconcile(ctx context.Context, ingress *extensions.Ingress, backend extensions.IngressBackend) (TargetGroup, error)
 }
 
-func NewController(cloud aws.CloudAPI, store store.Storer, nameTagGen NameTagGenerator, tagsController tags.Controller, endpointResolver backend.EndpointResolver) Controller {
+func NewController(cloud aws.CloudAPI, store store.Storer, nameTagGen NameTagGenerator, tagsController tags.Controller, endpointResolver backend.EndpointResolver, client client.Client) Controller {
 	attrsController := NewAttributesController(cloud)
-	targetsController := NewTargetsController(cloud, endpointResolver)
+	targetsController := NewTargetsController(cloud, endpointResolver, client)
 	return &defaultController{
 		cloud:             cloud,
 		store:             store,

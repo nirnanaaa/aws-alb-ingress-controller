@@ -9,9 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/albctx"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/aws"
+	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/annotations/parser"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/backend"
 	api "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Targets contains the targets for a target group.
@@ -48,34 +51,48 @@ type TargetsController interface {
 }
 
 // NewTargetsController constructs a new target group targets controller
-func NewTargetsController(cloud aws.CloudAPI, endpointResolver backend.EndpointResolver) TargetsController {
+func NewTargetsController(cloud aws.CloudAPI, endpointResolver backend.EndpointResolver, client client.Client) TargetsController {
 	return &targetsController{
 		cloud:            cloud,
 		endpointResolver: endpointResolver,
+		client:           client,
 	}
 }
 
 type targetsController struct {
 	cloud            aws.CloudAPI
 	endpointResolver backend.EndpointResolver
+	client           client.Client
 }
 
 func (c *targetsController) Reconcile(ctx context.Context, t *Targets) error {
-	desired, err := c.endpointResolver.Resolve(t.Ingress, t.Backend, t.TargetType)
+	desiredTargets, err := c.endpointResolver.Resolve(t.Ingress, t.Backend, t.TargetType)
 	if err != nil {
 		return err
 	}
 	if t.TargetType == elbv2.TargetTypeEnumIp {
-		err = c.populateTargetAZ(ctx, desired)
+		err = c.populateTargetAZ(ctx, desiredTargets)
 		if err != nil {
 			return err
 		}
 	}
-	current, err := c.getCurrentTargets(ctx, t.TgArn)
+	currentHealth, currentTargets, err := c.getCurrentTargets(ctx, t.TgArn)
 	if err != nil {
 		return err
 	}
-	additions, removals := targetChangeSets(current, desired)
+	if t.TargetType == elbv2.TargetTypeEnumIp {
+		// pods conditions reconciling only makes sense for target type == IP;
+		// with target type == node, a 1:1 mapping between ALB target and pod is not possible
+		pods, err := c.endpointResolver.ReverseResolve(t.Ingress, t.Backend, currentTargets)
+		if err == nil {
+			err = c.reconcilePodConditions(ctx, t.Ingress.Name, currentHealth, pods)
+		}
+		if err != nil {
+			albctx.GetLogger(ctx).Errorf("Error reconsiling pod conditions for %v: %v", t.TgArn, err.Error())
+			albctx.GetEventf(ctx)(api.EventTypeWarning, "ERROR", "Error reconciling pod conditions for target group %s: %s", t.TgArn, err.Error())
+		}
+	}
+	additions, removals := targetChangeSets(currentTargets, desiredTargets)
 	if len(additions) > 0 {
 		albctx.GetLogger(ctx).Infof("Adding targets to %v: %v", t.TgArn, tdsString(additions))
 		in := &elbv2.RegisterTargetsInput{
@@ -105,15 +122,64 @@ func (c *targetsController) Reconcile(ctx context.Context, t *Targets) error {
 		}
 		// TODO add Delete events ?
 	}
-	t.Targets = desired
+	t.Targets = desiredTargets
 	return nil
 }
 
-func (c *targetsController) getCurrentTargets(ctx context.Context, TgArn string) ([]*elbv2.TargetDescription, error) {
+// For each given pod, checks for the health status of the corresponding target in the target group and adds/updates a pod condition that can be used for pod readiness gates.
+func (c *targetsController) reconcilePodConditions(ctx context.Context, ingressName string, targetsHealth []*elbv2.TargetHealthDescription, pods []*api.Pod) error {
+	conditionType := api.PodConditionType(fmt.Sprintf("target-health.%s", parser.GetAnnotationWithPrefix(ingressName)))
+	for i, pod := range pods {
+		var conditionStatus api.ConditionStatus
+		healthState := *targetsHealth[i].TargetHealth.State
+		if healthState == elbv2.TargetHealthStateEnumHealthy {
+			conditionStatus = api.ConditionTrue
+		} else if healthState == elbv2.TargetHealthStateEnumUnhealthy {
+			conditionStatus = api.ConditionFalse
+		} else if healthState == elbv2.TargetHealthStateEnumInitial {
+			conditionStatus = api.ConditionUnknown
+		} else {
+			// ignore Draining state
+			continue
+		}
+
+		for _, rg := range pod.Spec.ReadinessGates {
+			if rg.ConditionType != conditionType {
+				continue
+			}
+
+			found := false
+			for _, cond := range pod.Status.Conditions {
+				if cond.Type == conditionType {
+					cond.Status = conditionStatus
+					cond.LastProbeTime = metav1.Now()
+					found = true
+					break
+				}
+			}
+			if !found {
+				targetHealthCondition := api.PodCondition{
+					Type:          conditionType,
+					Status:        conditionStatus,
+					LastProbeTime: metav1.Now(),
+				}
+				pod.Status.Conditions = append(pod.Status.Conditions, targetHealthCondition)
+			}
+
+			err := c.client.Status().Update(ctx, pod)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *targetsController) getCurrentTargets(ctx context.Context, TgArn string) ([]*elbv2.TargetHealthDescription, []*elbv2.TargetDescription, error) {
 	opts := &elbv2.DescribeTargetHealthInput{TargetGroupArn: aws.String(TgArn)}
 	resp, err := c.cloud.DescribeTargetHealthWithContext(ctx, opts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var current []*elbv2.TargetDescription
@@ -123,7 +189,7 @@ func (c *targetsController) getCurrentTargets(ctx context.Context, TgArn string)
 		}
 		current = append(current, thd.Target)
 	}
-	return current, nil
+	return resp.TargetHealthDescriptions, current, nil
 }
 
 func (c *targetsController) populateTargetAZ(ctx context.Context, a []*elbv2.TargetDescription) error {

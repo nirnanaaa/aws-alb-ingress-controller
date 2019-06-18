@@ -147,7 +147,11 @@ func (resolver *endpointResolver) resolveIP(ingress *extensions.Ingress, backend
 			if servicePort.Name != "" && servicePort.Name != epPort.Name {
 				continue
 			}
-			for _, epAddr := range epSubset.Addresses {
+			addresses := epSubset.Addresses
+			if service.Spec.PublishNotReadyAddresses {
+				addresses = append(addresses, epSubset.NotReadyAddresses...)
+			}
+			for _, epAddr := range addresses {
 				result = append(result, &elbv2.TargetDescription{
 					Id:   aws.String(epAddr.IP),
 					Port: aws.Int64(int64(epPort.Port)),

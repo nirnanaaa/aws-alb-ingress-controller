@@ -67,7 +67,7 @@ type Storer interface {
 	// GetClusterInstanceIDs gets id of all instances inside cluster
 	GetClusterInstanceIDs() ([]string, error)
 
-	// GetServicePod gets all pods that match the selector of a service
+	// GetServicePods gets all pods that match the selector of a service
 	GetServicePods(selector map[string]string) []*corev1.Pod
 }
 

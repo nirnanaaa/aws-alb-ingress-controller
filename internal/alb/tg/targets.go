@@ -81,8 +81,8 @@ func (c *targetsController) Reconcile(ctx context.Context, t *Targets) error {
 		return err
 	}
 	if t.TargetType == elbv2.TargetTypeEnumIp {
-		// pods conditions reconciling only makes sense for target type == IP;
-		// with target type == node, a 1:1 mapping between ALB target and pod is not possible
+		// pods conditions reconciling is only implemented for target type == IP;
+		// with target type == node, a 1:1 mapping between ALB target and pod is only possible if hostPort is used, which is discouraged
 		pods, err := c.endpointResolver.ReverseResolve(t.Ingress, t.Backend, currentTargets)
 		if err == nil {
 			err = c.reconcilePodConditions(ctx, t.Ingress.Name, currentHealth, pods)

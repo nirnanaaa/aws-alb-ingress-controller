@@ -73,7 +73,7 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 		podMap[pod.Name] = pod
 	}
 
-	result := make([]*corev1.Pod, len(targets))
+	result := []*corev1.Pod{}
 	for _, epSubset := range eps.Subsets {
 		for _, epPort := range epSubset.Ports {
 			// servicePort.Name is optional if there is only one port
@@ -101,16 +101,26 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 				}
 				fmt.Printf("pod count: %d\n", len(targets))
 
-				for i, target := range targets {
+				for _, target := range targets {
 					if *target.Id == pod.Status.PodIP {
-						result[i] = pod
+						if !podExists(result, pod) {
+							result = append(result, pod)
+						}
 					}
 				}
 			}
 		}
 	}
-	fmt.Printf("%+v", result)
 	return result, nil
+}
+
+func podExists(slice []*corev1.Pod, pod *corev1.Pod) bool {
+	for _, value := range slice {
+		if value.ObjectMeta.UID == pod.ObjectMeta.UID {
+			return true
+		}
+	}
+	return false
 }
 
 func (resolver *endpointResolver) resolveInstance(ingress *extensions.Ingress, backend *extensions.IngressBackend) ([]*elbv2.TargetDescription, error) {

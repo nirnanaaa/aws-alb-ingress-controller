@@ -12,15 +12,15 @@ import (
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // Reconciler reconciles an single ingress object
 type Reconciler struct {
-	client   client.Client
+	client   kubernetes.Interface
 	cache    cache.Cache
 	recorder record.EventRecorder
 
@@ -90,7 +90,8 @@ func (r *Reconciler) updateIngressStatus(ctx context.Context, ingress *extension
 				Hostname: lbInfo.DNSName,
 			},
 		}
-		return r.client.Status().Update(ctx, ingress)
+		_, err := r.client.Extensions().Ingresses(ingress.Namespace).Update(ingress)
+		return err
 	}
 	return nil
 }

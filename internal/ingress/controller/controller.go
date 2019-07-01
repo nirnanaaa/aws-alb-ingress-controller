@@ -20,6 +20,7 @@ import (
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/metric"
 	corev1 "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -58,7 +59,13 @@ func newReconciler(config *config.Configuration, mgr manager.Manager, mc metric.
 	if err != nil {
 		return nil, err
 	}
-	client := mgr.GetClient()
+	restConfig := mgr.GetConfig()
+	client, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, err
+	}
+	// kubernetes.
+	// client, err := kubernetes.NewClientSet(config)
 	nameTagGenerator := generator.NewNameTagGenerator(*config)
 	tagsController := tags.NewController(cloud)
 	endpointResolver := backend.NewEndpointResolver(store, cloud)

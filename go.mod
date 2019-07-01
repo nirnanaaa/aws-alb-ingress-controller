@@ -4,6 +4,7 @@ require (
 	github.com/appscode/jsonpatch v0.0.0-20190108182946-7c0e3b262f30 // indirect
 	github.com/aws/aws-sdk-go v1.16.35
 	github.com/blang/semver v3.5.1+incompatible
+	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-logr/glogr v0.1.0
 	github.com/go-logr/logr v0.1.0 // indirect
 	github.com/go-logr/zapr v0.1.0 // indirect
@@ -44,7 +45,7 @@ require (
 	golang.org/x/time v0.0.0-20181108054448-85acf8d2951c // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/api v0.0.0-20181213150558-05914d821849
-	k8s.io/apimachinery v0.0.0-20181127025237-2b1284ed4c93
+	k8s.io/apimachinery v0.0.0-20190221084156-01f179d85dbc
 	k8s.io/apiserver v0.0.0-20190214201149-f9f16382a346
 	k8s.io/client-go v2.0.0-alpha.0.0.20181213151034-8d9ed539ba31+incompatible
 	k8s.io/klog v0.2.0

@@ -15,7 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func Test_NewTargets(t *testing.T) {
@@ -282,7 +282,7 @@ func Test_TargetsReconcile(t *testing.T) {
 			if tc.GetVpcCall != nil {
 				cloud.On("GetVpcWithContext", ctx).Return(tc.GetVpcCall.Output, tc.GetVpcCall.Err)
 			}
-			client := fake.NewFakeClient()
+			client := fake.NewSimpleClientset()
 			controller := NewTargetsController(cloud, endpointResolver, client)
 			err := controller.Reconcile(context.Background(), tc.Targets)
 

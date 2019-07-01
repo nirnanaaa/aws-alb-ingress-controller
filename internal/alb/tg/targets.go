@@ -12,12 +12,9 @@ import (
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/aws"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/annotations/parser"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/backend"
-	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/utils"
 	api "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	clientset "k8s.io/client-go/kubernetes"
 )
 
 // Targets contains the targets for a target group.
@@ -132,31 +129,21 @@ func (c *targetsController) Reconcile(ctx context.Context, t *Targets) error {
 // For each given pod, checks for the health status of the corresponding target in the target group and adds/updates a pod condition that can be used for pod readiness gates.
 func (c *targetsController) reconcilePodConditions(ctx context.Context, ingressName string, targetsHealth []*elbv2.TargetHealthDescription, pods []*api.Pod) error {
 	conditionType := api.PodConditionType(fmt.Sprintf("target-health.%s", parser.GetAnnotationWithPrefix(ingressName)))
-
 	for i, pod := range pods {
 		expectedCondition := api.PodCondition{Type: conditionType}
 		if !ReadinessGateEnabled(pod, conditionType) {
 			continue
 		}
-		targetHealth := targetsHealth[i]
-		if targetHealth == nil || targetHealth.TargetHealth == nil {
-			albctx.GetLogger(ctx).Errorf("Error obtaining target health for pod %v", pod.ObjectMeta.Name)
-			continue
-		}
 		elbTargetHealth := targetsHealth[i].TargetHealth.State
 		if elbTargetHealth == nil {
-			albctx.GetLogger(ctx).Errorf("pod %v has no health condition", pod.ObjectMeta.Name)
+			albctx.GetLogger(ctx).Errorf("target has no health state")
 			continue
 		}
 		healthState := *elbTargetHealth
-		if healthState == elbv2.TargetHealthStateEnumHealthy {
-			expectedCondition.Status = api.ConditionTrue
-		} else {
-			expectedCondition.Reason = healthState
-		}
+		expectedCondition.Status = getPodReadyState(pod, healthState)
 		condition, ok := GetReadinessConditionStatus(pod, conditionType)
 		if ok && reflect.DeepEqual(expectedCondition, condition) {
-			return nil
+			continue
 		}
 		oldStatus := pod.Status.DeepCopy()
 		SetReadinessConditionStatus(pod, conditionType, expectedCondition)
@@ -171,21 +158,6 @@ func (c *targetsController) reconcilePodConditions(ctx context.Context, ingressN
 		}
 	}
 	return nil
-}
-
-// patchPodStatus patches pod status with given patchBytes
-func patchPodStatus(c clientset.Interface, namespace, name string, patchBytes []byte) (*api.Pod, []byte, error) {
-	updatedPod, err := c.CoreV1().Pods(namespace).Patch(name, types.StrategicMergePatchType, patchBytes, "status")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to patch status %q for pod %q/%q: %v", patchBytes, namespace, name, err)
-	}
-	return updatedPod, patchBytes, nil
-}
-
-// preparePatchBytesforPodStatus generates patch bytes based on the old and new pod status
-func preparePatchBytesforPodStatus(oldPodStatus, newPodStatus api.PodStatus) ([]byte, error) {
-	patchBytes, err := utils.StrategicMergePatchBytes(api.Pod{Status: oldPodStatus}, api.Pod{Status: newPodStatus}, api.Pod{})
-	return patchBytes, err
 }
 
 func (c *targetsController) getCurrentTargets(ctx context.Context, TgArn string) ([]*elbv2.TargetHealthDescription, []*elbv2.TargetDescription, error) {

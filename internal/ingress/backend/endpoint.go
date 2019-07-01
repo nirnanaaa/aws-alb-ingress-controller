@@ -82,25 +82,16 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 			}
 			for _, epAddr := range append(epSubset.Addresses, epSubset.NotReadyAddresses...) {
 				if epAddr.TargetRef == nil {
-					fmt.Printf("target ref name not set: %v\n", epPort)
 					continue
 				}
-				// if epAddr.TargetRef.APIVersion != "v1" {
-				// 	fmt.Printf("target ref version does not match: %v %v\n", epPort, epAddr.TargetRef)
-				// 	continue
-				// }
 				if epAddr.TargetRef.Kind != "Pod" {
-					fmt.Printf("target is not a pod: %v\n", epPort)
 					continue
 				}
 
 				pod, ok := podMap[epAddr.TargetRef.Name]
 				if !ok {
-					fmt.Printf("no pod found: %v\n", epPort)
 					continue
 				}
-				fmt.Printf("pod count: %d\n", len(targets))
-
 				for _, target := range targets {
 					if *target.Id == pod.Status.PodIP {
 						if !podExists(result, pod) {

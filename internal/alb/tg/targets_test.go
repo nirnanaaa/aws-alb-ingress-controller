@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func Test_NewTargets(t *testing.T) {
@@ -265,6 +266,7 @@ func Test_TargetsReconcile(t *testing.T) {
 			endpointResolver := &mocks.EndpointResolver{}
 			if tc.ResolveCall != nil {
 				endpointResolver.On("Resolve", tc.ResolveCall.InputIngress, tc.ResolveCall.InputBackend, tc.ResolveCall.InputTargetType).Return(tc.ResolveCall.Output, tc.ResolveCall.Err)
+				endpointResolver.On("ReverseResolve", tc.ResolveCall.InputIngress, tc.ResolveCall.InputBackend, tc.ResolveCall.Output).Return([]corev1.Pod{}, nil)
 			}
 
 			cloud := &mocks.CloudAPI{}
@@ -280,8 +282,8 @@ func Test_TargetsReconcile(t *testing.T) {
 			if tc.GetVpcCall != nil {
 				cloud.On("GetVpcWithContext", ctx).Return(tc.GetVpcCall.Output, tc.GetVpcCall.Err)
 			}
-
-			controller := NewTargetsController(cloud, endpointResolver)
+			client := fake.NewFakeClient()
+			controller := NewTargetsController(cloud, endpointResolver, client)
 			err := controller.Reconcile(context.Background(), tc.Targets)
 
 			if tc.ExpectedError != nil {

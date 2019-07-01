@@ -67,7 +67,7 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 		return nil, fmt.Errorf("Unable to find service endpoints for %s: %v", serviceKey, err.Error())
 	}
 
-	var podMap map[string]*corev1.Pod
+	podMap := make(map[string]*corev1.Pod)
 	pods := resolver.store.GetServicePods(service.Spec.Selector)
 	for _, pod := range pods {
 		podMap[pod.Name] = pod
@@ -81,14 +81,25 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 				continue
 			}
 			for _, epAddr := range append(epSubset.Addresses, epSubset.NotReadyAddresses...) {
-				if epAddr.TargetRef == nil || epAddr.TargetRef.APIVersion != "v1" || epAddr.TargetRef.Kind != "Pod" {
+				if epAddr.TargetRef == nil {
+					fmt.Printf("target ref name not set: %v\n", epPort)
+					continue
+				}
+				// if epAddr.TargetRef.APIVersion != "v1" {
+				// 	fmt.Printf("target ref version does not match: %v %v\n", epPort, epAddr.TargetRef)
+				// 	continue
+				// }
+				if epAddr.TargetRef.Kind != "Pod" {
+					fmt.Printf("target is not a pod: %v\n", epPort)
 					continue
 				}
 
 				pod, ok := podMap[epAddr.TargetRef.Name]
 				if !ok {
+					fmt.Printf("no pod found: %v\n", epPort)
 					continue
 				}
+				fmt.Printf("pod count: %d\n", len(targets))
 
 				for i, target := range targets {
 					if *target.Id == pod.Status.PodIP {
@@ -98,6 +109,7 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 			}
 		}
 	}
+	fmt.Printf("%+v", result)
 	return result, nil
 }
 

@@ -130,8 +130,25 @@ func (c *targetsController) Reconcile(ctx context.Context, t *Targets) error {
 func (c *targetsController) reconcilePodConditions(ctx context.Context, ingressName string, targetsHealth []*elbv2.TargetHealthDescription, pods []*api.Pod) error {
 	conditionType := api.PodConditionType(fmt.Sprintf("target-health.%s", parser.GetAnnotationWithPrefix(ingressName)))
 	for i, pod := range pods {
+		if pod == nil {
+			albctx.GetLogger(ctx).Errorf("pod is not set")
+			continue
+		}
 		var conditionStatus api.ConditionStatus
-		healthState := *targetsHealth[i].TargetHealth.State
+		targetHealth := targetsHealth[i]
+		if targetHealth == nil || targetHealth.TargetHealth == nil {
+			albctx.GetLogger(ctx).Errorf("Error obtaining target health for pod %v", pod.ObjectMeta.Name)
+			continue
+		}
+		elbTargetHealth := targetsHealth[i].TargetHealth.State
+		if elbTargetHealth == nil {
+			albctx.GetLogger(ctx).Errorf("pod %v has no health condition", pod.ObjectMeta.Name)
+			continue
+		}
+		albctx.GetLogger(ctx).Errorf("pod health state in ELB: %v", elbTargetHealth)
+		healthState := *elbTargetHealth
+		albctx.GetLogger(ctx).Errorf("pod health state in ELB: %v", healthState)
+
 		if healthState == elbv2.TargetHealthStateEnumHealthy {
 			conditionStatus = api.ConditionTrue
 		} else if healthState == elbv2.TargetHealthStateEnumUnhealthy {

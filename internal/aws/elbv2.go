@@ -39,6 +39,8 @@ type ELBV2API interface {
 	// DeleteTargetGroupByArn deletes TargetGroup instance by arn
 	DeleteTargetGroupByArn(context.Context, string) error
 
+	GetTargetsForTargetGroupArn(context.Context, string) ([]*elbv2.TargetHealthDescription, error)
+
 	DescribeTargetGroupAttributesWithContext(context.Context, *elbv2.DescribeTargetGroupAttributesInput) (*elbv2.DescribeTargetGroupAttributesOutput, error)
 	ModifyTargetGroupAttributesWithContext(context.Context, *elbv2.ModifyTargetGroupAttributesInput) (*elbv2.ModifyTargetGroupAttributesOutput, error)
 	CreateTargetGroupWithContext(context.Context, *elbv2.CreateTargetGroupInput) (*elbv2.CreateTargetGroupOutput, error)
@@ -321,4 +323,14 @@ func (c *Cloud) describeTargetGroupsHelper(input *elbv2.DescribeTargetGroupsInpu
 		return true
 	})
 	return result, err
+}
+
+func (c *Cloud) GetTargetsForTargetGroupArn(ctx context.Context, tgArn string) (targets []*elbv2.TargetHealthDescription, err error) {
+	targetOutput, err := c.elbv2.DescribeTargetHealth(&elbv2.DescribeTargetHealthInput{
+		TargetGroupArn: aws.String(tgArn),
+	})
+	if err != nil {
+		return
+	}
+	return targetOutput.TargetHealthDescriptions, nil
 }

@@ -3,13 +3,14 @@ package readiness
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/aws"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 
-	// "strconv"
+	"strconv"
 	// "strings"
 	"sync"
 )
@@ -56,8 +57,6 @@ type poller struct {
 	lookup    TGLookup
 	patcher   podStatusPatcher
 	cloud     aws.CloudAPI
-	// add aws lib
-	// aws  negtypes.NetworkEndpointGroupCloud
 }
 
 func NewPoller(podLister cache.Indexer, lookup TGLookup, patcher podStatusPatcher, cloud aws.CloudAPI) *poller {
@@ -123,7 +122,7 @@ func (p *poller) Poll(key tgMeta) (retry bool, err error) {
 	var errList []error
 	klog.V(2).Infof("polling TG %q", key.ARN)
 
-	targets, err := p.cloud.GetTargetGroupByArn(context.TODO(), key.ARN)
+	targets, err := p.cloud.GetTargetsForTargetGroupArn(context.TODO(), key.ARN)
 	if err != nil {
 		return true, err
 	}
@@ -153,35 +152,19 @@ func (p *poller) Poll(key tgMeta) (retry bool, err error) {
 
 // processHealthStatus evaluates the health status of the input network endpoint.
 // Assumes p.lock is held when calling this method.
-func (p *poller) processHealthStatus(key tgMeta, healthStatus string) (healthy bool, err error) {
-	// ne := NetworkEndpoint{
-	// 	IP:   healthStatus.NetworkEndpoint.IpAddress,
-	// 	Port: strconv.FormatInt(healthStatus.NetworkEndpoint.Port, 10),
-	// }
-	// podName, ok := p.getPod(key, ne)
-	// if !ok {
-	// 	return false, nil
-	// }
-
-	// for _, hs := range healthStatus.Healths {
-	// 	if hs == nil {
-	// 		continue
-	// 	}
-	// 	if hs.BackendService == nil {
-	// 		klog.Warningf("Backend service is nil in health status of network endpoint %v: %v", ne, hs)
-	// 		continue
-	// 	}
-
-	// 	// This assumes the ingress backend service uses the NEG naming scheme. Hence the backend service share the same name as NEG.
-	// 	if strings.Contains(hs.BackendService.BackendService, key.Name) {
-	// 		if hs.HealthState == healthyState {
-	// 			healthy = true
-	// 			err := p.patcher.syncPod(keyFunc(podName.Namespace, podName.Name), key.Name)
-	// 			return healthy, err
-	// 		}
-	// 	}
-
-	// }
+func (p *poller) processHealthStatus(key tgMeta, healthState *elbv2.TargetHealthDescription) (healthy bool, err error) {
+	ne := NetworkEndpoint{
+		IP:   aws.StringValue(healthState.Target.Id),
+		Port: strconv.FormatInt(aws.Int64Value(healthState.Target.Port), 10),
+	}
+	podName, ok := p.getPod(key, ne)
+	if !ok {
+		return false, nil
+	}
+	if aws.StringValue(healthState.TargetHealth.State) == elbv2.TargetHealthStateEnumHealthy {
+		err := p.patcher.syncPod(keyFunc(podName.Namespace, podName.Name), key.ARN)
+		return true, err
+	}
 	return false, nil
 }
 

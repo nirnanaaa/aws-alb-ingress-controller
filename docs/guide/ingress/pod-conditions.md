@@ -13,7 +13,7 @@ In order to avoid this situation, the AWS ALB ingress controller can set the bef
 
 ## Pod configuration
 
-Add a readiness gate with `conditionType: target-health.alb.ingress.kubernetes.io/<ingress name>` to your pod:
+Add a readiness gate with `conditionType: target-health.alb.ingress.kubernetes.io/load-balancer-tg-ready` to your pod:
 
 ```yaml
 apiVersion: apps/v1
@@ -31,7 +31,7 @@ spec:
         app: nginx
     spec:
       readinessGates:
-      - conditionType: target-health.alb.ingress.kubernetes.io/nginx-ingress
+      - conditionType: target-health.alb.ingress.kubernetes.io/load-balancer-tg-ready
       containers:
       - name: nginx
         image: nginx

@@ -2,12 +2,15 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/alb/lb"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/albctx"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/controller/store"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/metric"
+	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/utils"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/pkg/util/log"
+
 	corev1 "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -85,15 +88,35 @@ func (r *Reconciler) updateIngressStatus(ctx context.Context, ingress *extension
 	if len(ingress.Status.LoadBalancer.Ingress) != 1 ||
 		ingress.Status.LoadBalancer.Ingress[0].IP != "" ||
 		ingress.Status.LoadBalancer.Ingress[0].Hostname != lbInfo.DNSName {
+		oldStatus := ingress.Status.DeepCopy()
 		ingress.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{
 			{
 				Hostname: lbInfo.DNSName,
 			},
 		}
-		_, err := r.client.Extensions().Ingresses(ingress.Namespace).Update(ingress)
+		patchBytes, err := preparePatchBytesforIngressStatus(*oldStatus, ingress.Status)
+		if err != nil {
+			return fmt.Errorf("failed to prepare patch bytes for ingress %v: %v", ingress, err)
+		}
+		_, _, err = patchIngressStatus(r.client, ingress.Namespace, ingress.Name, patchBytes)
 		return err
 	}
 	return nil
+}
+
+// patchIngressStatus patches pod status with given patchBytes
+func patchIngressStatus(c kubernetes.Interface, namespace, name string, patchBytes []byte) (*extensions.Ingress, []byte, error) {
+	updatedIngress, err := c.Extensions().Ingresses(namespace).Patch(name, types.StrategicMergePatchType, patchBytes, "status")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to patch status %q for ingress %q/%q: %v", patchBytes, namespace, name, err)
+	}
+	return updatedIngress, patchBytes, nil
+}
+
+// preparePatchBytesforIngressStatus generates patch bytes based on the old and new ingress status
+func preparePatchBytesforIngressStatus(oldIngressStatus, newIngressStatus extensions.IngressStatus) ([]byte, error) {
+	patchBytes, err := utils.StrategicMergePatchBytes(extensions.Ingress{Status: oldIngressStatus}, extensions.Ingress{Status: newIngressStatus}, extensions.Ingress{})
+	return patchBytes, err
 }
 
 func (r *Reconciler) buildReconcileContext(ctx context.Context, ingressKey types.NamespacedName, ingress *extensions.Ingress) context.Context {

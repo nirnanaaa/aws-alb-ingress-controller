@@ -69,6 +69,9 @@ type Storer interface {
 
 	// GetServicePods gets all pods that match the selector of a service
 	GetServicePods(selector map[string]string) []*corev1.Pod
+
+	// ReadinessGateEnabled lists if a pod has readiness gates enabled
+	ReadinessGateEnabled(key string) bool
 }
 
 // Informer defines the required SharedIndexInformers that interact with the API server.
@@ -320,6 +323,9 @@ func (s *k8sStore) GetNodeInstanceID(node *corev1.Node) (string, error) {
 	return p[len(p)-1], nil
 }
 
+func (s k8sStore) ReadinessGateEnabled(key string) (bool) {
+	return false
+}
 func (s *k8sStore) GetInstanceIDFromPodIP(ip string) (string, error) {
 
 	var hostIP string

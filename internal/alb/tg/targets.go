@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/albctx"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/aws"
-	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/annotations/parser"
 	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/ingress/backend"
 	api "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
@@ -128,10 +127,9 @@ func (c *targetsController) Reconcile(ctx context.Context, t *Targets) error {
 
 // For each given pod, checks for the health status of the corresponding target in the target group and adds/updates a pod condition that can be used for pod readiness gates.
 func (c *targetsController) reconcilePodConditions(ctx context.Context, ingressName string, targetsHealth []*elbv2.TargetHealthDescription, pods []*api.Pod) error {
-	conditionType := api.PodConditionType(fmt.Sprintf("target-health.%s", parser.GetAnnotationWithPrefix(ingressName)))
 	for i, pod := range pods {
-		expectedCondition := api.PodCondition{Type: conditionType}
-		if !ReadinessGateEnabled(pod, conditionType) {
+		expectedCondition := api.PodCondition{Type: TGReadinessGate}
+		if !ReadinessGateEnabled(pod) {
 			continue
 		}
 		elbTargetHealth := targetsHealth[i].TargetHealth.State
@@ -140,13 +138,13 @@ func (c *targetsController) reconcilePodConditions(ctx context.Context, ingressN
 			continue
 		}
 		healthState := *elbTargetHealth
-		expectedCondition.Status = getPodReadyState(pod, healthState)
-		condition, ok := GetReadinessConditionStatus(pod, conditionType)
+		getPodReadyState(healthState, &expectedCondition)
+		condition, ok := ReadinessConditionStatus(pod)
 		if ok && reflect.DeepEqual(expectedCondition, condition) {
 			continue
 		}
 		oldStatus := pod.Status.DeepCopy()
-		SetReadinessConditionStatus(pod, conditionType, expectedCondition)
+		SetReadinessConditionStatus(pod, expectedCondition)
 
 		patchBytes, err := preparePatchBytesforPodStatus(*oldStatus, pod.Status)
 		if err != nil {

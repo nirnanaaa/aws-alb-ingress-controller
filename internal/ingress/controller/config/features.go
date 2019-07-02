@@ -27,7 +27,8 @@ import (
 type Feature string
 
 const (
-	WAF Feature = "waf"
+	WAF       Feature = "waf"
+	Readiness Feature = "readiness"
 )
 
 type FeatureGate interface {

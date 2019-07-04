@@ -28,7 +28,7 @@ func ReadinessConditionStatus(pod *v1.Pod) (condition v1.PodCondition, exists bo
 	return v1.PodCondition{}, false
 }
 
-// SetReadinessConditionStatus sets the status of the NEG readiness condition
+// SetReadinessConditionStatus sets the status of the targetgroup readiness condition
 func SetReadinessConditionStatus(pod *v1.Pod, condition v1.PodCondition) {
 	if pod == nil {
 		return
@@ -42,6 +42,7 @@ func SetReadinessConditionStatus(pod *v1.Pod, condition v1.PodCondition) {
 	pod.Status.Conditions = append(pod.Status.Conditions, condition)
 }
 
+// ReadinessGateEnabled checks if the pod has a readiness gate on the ALB
 func ReadinessGateEnabled(pod *v1.Pod) bool {
 	if pod == nil {
 		return false

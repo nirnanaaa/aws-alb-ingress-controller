@@ -19,29 +19,29 @@ const (
 	healthyState = "HEALTHY"
 )
 
-// tgMeta references a AWS target group resource
+// tgMeta references an AWS target group resource
 type tgMeta struct {
 	SyncerKey TGSyncKey
 	// ARN is the arn of the tg
 	ARN string
 }
 
-// func (n tgMeta) String() string {
-// 	return fmt.Sprintf("%s-%s-%s", n.SyncerKey.String(), n.Name, n.Zone)
-// }
+func (n tgMeta) String() string {
+	return fmt.Sprintf("%s-%s", n.SyncerKey.String(), n.ARN)
+}
 
 // podStatusPatcher interface allows patching pod status
 type podStatusPatcher interface {
 	// syncPod patches the target condition in the pod status to be True.
 	// key is the key to the pod. It is the namespaced name in the format of "namespace/name"
-	// tgArn is the name of the Target Group resource
-	syncPod(key, tgArn string) error
+	// tgARN is the name of the Target Group resource
+	syncPod(key, tgARN string) error
 }
 
 // pollTarget is the target for polling
 type pollTarget struct {
-	// endpointMap maps network endpoint to namespaced name of pod
-	endpointMap EndpointPodMap
+	// targetMap maps targets to namespaced name of pod
+	targetMap TargetPodMap
 	// polling indicates if the tg is being polled
 	polling bool
 }
@@ -49,7 +49,7 @@ type pollTarget struct {
 // poller tracks the tgs and corresponding targets needed to be polled.
 type poller struct {
 	lock sync.Mutex
-	// pollMap contains tgs and corresponding targets needed to be polled.
+	// pollMap contains targetgroups and corresponding targets needed to be polled.
 	// all operations(read, write) to the pollMap are lock protected.
 	pollMap map[tgMeta]*pollTarget
 
@@ -59,6 +59,7 @@ type poller struct {
 	cloud     aws.CloudAPI
 }
 
+// NewPoller creates a poller
 func NewPoller(podLister cache.Indexer, lookup TGLookup, patcher podStatusPatcher, cloud aws.CloudAPI) *poller {
 	return &poller{
 		pollMap:   make(map[tgMeta]*pollTarget),
@@ -69,27 +70,27 @@ func NewPoller(podLister cache.Indexer, lookup TGLookup, patcher podStatusPatche
 	}
 }
 
-// RegisterEndpoints registered the endpoints that needed to be poll for the TG with lock
-func (p *poller) RegisterEndpoints(key tgMeta, endpointMap EndpointPodMap) {
+// RegisterTargets registers the targets that need to be polled for the TG with lock
+func (p *poller) RegisterTargets(key tgMeta, targetMap TargetPodMap) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.registerEndpoints(key, endpointMap)
+	p.registerTargets(key, targetMap)
 }
 
-// registerEndpoints registered the endpoints that needed to be poll for the TG
-// It returns false if there is no endpoints needed to be polled, returns true if otherwise.
+// registerTargets registers the targets that need to be polled for the TG.
+// It returns false if there are no targets in need of polling, returns true if otherwise.
 // Assumes p.lock is held when calling this method.
-func (p *poller) registerEndpoints(key tgMeta, endpointMap EndpointPodMap) bool {
-	endpointsToPoll := needToPoll(key.SyncerKey, endpointMap, p.lookup, p.podLister)
-	if len(endpointsToPoll) == 0 {
-		delete(p.pollMap, key)
+func (p *poller) registerTargets(tg tgMeta, targetMap TargetPodMap) bool {
+	targetsToPoll := needToPoll(key.SyncerKey, targetMap, p.lookup, p.podLister)
+	if len(targetsToPoll) == 0 {
+		delete(p.pollMap, tg)
 		return false
 	}
 
-	if v, ok := p.pollMap[key]; ok {
-		v.endpointMap = endpointsToPoll
+	if v, ok := p.pollMap[tg]; ok {
+		v.targetMap = targetsToPoll
 	} else {
-		p.pollMap[key] = &pollTarget{endpointMap: endpointsToPoll}
+		p.pollMap[tg] = &pollTarget{targetMap: targetsToPoll}
 	}
 	return true
 }
@@ -99,25 +100,25 @@ func (p *poller) ScanForWork() []tgMeta {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	var ret []tgMeta
-	for key, target := range p.pollMap {
-		if target.polling {
+	for tg, pollTarget := range p.pollMap {
+		if pollTarget.polling {
 			continue
 		}
-		if p.registerEndpoints(key, target.endpointMap) {
-			ret = append(ret, key)
+		if p.registerTargets(tg, pollTarget.targetMap) {
+			ret = append(ret, tg)
 		}
 	}
 	return ret
 }
 
-// Poll polls a TG and returns error plus whether retry is needed
+// Poll polls a TG and returns an error and if a retry is needed
 // This function is threadsafe.
-func (p *poller) Poll(key tgMeta) (retry bool, err error) {
-	if !p.markPolling(key) {
-		klog.V(4).Infof("TG %q as is already being polled or no longer needed to be polled.", key.ARN)
+func (p *poller) Poll(tg tgMeta) (retry bool, err error) {
+	if !p.markPolling(tg) {
+		klog.V(4).Infof("TG %q as is already being polled or no longer needed to be polled.", tg.ARN)
 		return true, nil
 	}
-	defer p.unMarkPolling(key)
+	defer p.unMarkPolling(tg)
 
 	var errList []error
 	klog.V(2).Infof("polling TG %q", key.ARN)
@@ -127,15 +128,13 @@ func (p *poller) Poll(key tgMeta) (retry bool, err error) {
 		return true, err
 	}
 
-	// p.cloud
-
-	// Traverse the response and check if the endpoints in interest are HEALTHY
+	// Traverse the response and check if the targets of interest are HEALTHY
 	func() {
 		p.lock.Lock()
 		defer p.lock.Unlock()
 		var healthyCount int
 		for _, r := range targets {
-			healthy, err := p.processHealthStatus(key, r)
+			healthy, err := p.processHealthStatus(tg, r)
 			if healthy && err == nil {
 				healthyCount++
 			}
@@ -143,47 +142,47 @@ func (p *poller) Poll(key tgMeta) (retry bool, err error) {
 				errList = append(errList, err)
 			}
 		}
-		if healthyCount != len(p.pollMap[key].endpointMap) {
+		if healthyCount != len(p.pollMap[tg].targetMap) {
 			retry = true
 		}
 	}()
 	return retry, utilerrors.NewAggregate(errList)
 }
 
-// processHealthStatus evaluates the health status of the input network endpoint.
+// processHealthStatus evaluates the health status of the targetgroup target.
 // Assumes p.lock is held when calling this method.
-func (p *poller) processHealthStatus(key tgMeta, healthState *elbv2.TargetHealthDescription) (healthy bool, err error) {
-	ne := NetworkEndpoint{
+func (p *poller) processHealthStatus(tg tgMeta, healthState *elbv2.TargetHealthDescription) (healthy bool, err error) {
+	target := Target{
 		IP:   aws.StringValue(healthState.Target.Id),
 		Port: strconv.FormatInt(aws.Int64Value(healthState.Target.Port), 10),
 	}
-	podName, ok := p.getPod(key, ne)
+	podName, ok := p.getPod(tg, target)
 	if !ok {
 		return false, nil
 	}
 	if aws.StringValue(healthState.TargetHealth.State) == elbv2.TargetHealthStateEnumHealthy {
-		err := p.patcher.syncPod(keyFunc(podName.Namespace, podName.Name), key.ARN)
+		err := p.patcher.syncPod(keyFunc(podName.Namespace, podName.Name), tg.ARN)
 		return true, err
 	}
 	return false, nil
 }
 
-// getPod returns the namespaced name of a pod corresponds to an endpoint and whether the pod is registered
+// getPod checks if the namespaced name of a pod corresponds to a target and whether the pod is registered.
 // Assumes p.lock is held when calling this method.
-func (p *poller) getPod(key tgMeta, endpoint NetworkEndpoint) (namespacedName types.NamespacedName, exists bool) {
-	t, ok := p.pollMap[key]
+func (p *poller) getPod(tg tgMeta, target Target) (namespacedName types.NamespacedName, exists bool) {
+	t, ok := p.pollMap[tg]
 	if !ok {
 		return types.NamespacedName{}, false
 	}
-	ret, ok := t.endpointMap[endpoint]
+	ret, ok := t.targetMap[target]
 	return ret, ok
 }
 
 // markPolling returns true if the TG is successfully marked as polling
-func (p *poller) markPolling(key tgMeta) bool {
+func (p *poller) markPolling(tg tgMeta) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	t, ok := p.pollMap[key]
+	t, ok := p.pollMap[tg]
 	if !ok {
 		return false
 	}
@@ -194,11 +193,11 @@ func (p *poller) markPolling(key tgMeta) bool {
 	return true
 }
 
-// unMarkPolling unmarks the NEG
-func (p *poller) unMarkPolling(key tgMeta) {
+// unMarkPolling unmarks the targetgroup
+func (p *poller) unMarkPolling(tg tgMeta) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if t, ok := p.pollMap[key]; ok {
+	if t, ok := p.pollMap[tg]; ok {
 		t.polling = false
 	}
 }

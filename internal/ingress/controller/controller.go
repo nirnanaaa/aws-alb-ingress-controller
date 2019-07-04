@@ -34,6 +34,7 @@ func Initialize(config *config.Configuration, mgr manager.Manager, mc metric.Col
 	if err != nil {
 		return err
 	}
+
 	c, err := controller.New("alb-ingress-controller", mgr, controller.Options{Reconciler: reconciler})
 	if err != nil {
 		return err
@@ -74,6 +75,12 @@ func newReconciler(config *config.Configuration, mgr manager.Manager, mc metric.
 	sgAssociationController := sg.NewAssociationController(store, cloud, tagsController, nameTagGenerator)
 	lbController := lb.NewController(cloud, store,
 		nameTagGenerator, tgGroupController, lsGroupController, sgAssociationController, tagsController)
+
+	if config.FeatureGate.Enabled(Readiness) {
+		reflector = readiness.NewReadinessReflector(ctx, manager)
+	} else {
+		reflector = &readiness.NoopReflector{}
+	}
 
 	return &Reconciler{
 		client:          client,

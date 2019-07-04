@@ -3,11 +3,11 @@ package readiness
 import (
 	"fmt"
 
+	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/utils"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"github.com/kubernetes-sigs/aws-alb-ingress-controller/internal/utils"
 	"k8s.io/klog"
 )
 
@@ -97,22 +97,22 @@ func preparePatchBytesforPodStatus(oldPodStatus, newPodStatus v1.PodStatus) ([]b
 	return patchBytes, err
 }
 
-// needToPoll filter out the network endpoint that needs to be polled based on the following conditions:
+// needToPoll filters out the targets that needs to be polled based on the following conditions:
 // 1. tg syncer has readiness gate enabled
 // 2. the pod exists
 // 3. the pod has tg readiness gate
 // 4. the pod's tg readiness condition is not True
-func needToPoll(syncerKey TGSyncKey, endpointMap EndpointPodMap, lookup TGLookup, podLister cache.Indexer) EndpointPodMap {
+func needToPoll(syncerKey TGSyncerKey, targetMap TargetPodMap, lookup TGLookup, podLister cache.Indexer) TargetPodMap {
 	if !lookup.ReadinessGateEnabled(syncerKey) {
-		return EndpointPodMap{}
+		return TargetPodMap{}
 	}
-	removeIrrelevantEndpoints(endpointMap, podLister)
-	return endpointMap
+	removeIrrelevantTargets(targetMap, podLister)
+	return targetMap
 }
 
-// removeIrrelevantEndpoints will filter out the endpoints that does not need health status polling from the input endpoint map
-func removeIrrelevantEndpoints(endpointMap EndpointPodMap, podLister cache.Indexer) {
-	for endpoint, namespacedName := range endpointMap {
+// removeIrrelevantTargets will filter out the targets that do not need health status polling from the targets map
+func removeIrrelevantTargets(targetMap TargetPodMap, podLister cache.Indexer) {
+	for target, namespacedName := range targetMap {
 		pod, exists, err := getPodFromStore(podLister, namespacedName.Namespace, namespacedName.Name)
 		if err != nil {
 			klog.Warningf("Failed to retrieve pod %q from store: %v", namespacedName.String(), err)
@@ -120,7 +120,7 @@ func removeIrrelevantEndpoints(endpointMap EndpointPodMap, podLister cache.Index
 		if err == nil && exists && needToProcess(pod) {
 			continue
 		}
-		delete(endpointMap, endpoint)
+		delete(targetMap, target)
 	}
 }
 

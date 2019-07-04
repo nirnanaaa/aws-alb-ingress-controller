@@ -8,7 +8,8 @@ import (
 // TGReadinessGate defines a readiness gate
 const TGReadinessGate = "target-health.alb.ingress.kubernetes.io/load-balancer-tg-ready"
 
-type TGSyncKey struct {
+// TGSyncerKey includes information to uniquely identify a targetgroup syncer
+type TGSyncerKey struct {
 	// Namespace of service
 	Namespace string
 	// Name of service
@@ -19,14 +20,14 @@ type TGSyncKey struct {
 	TargetPort string
 }
 
-// NetworkEndpoint contains the essential information for each target in a target group
-type NetworkEndpoint struct {
+// Target contains the essential information for each target in a target group
+type Target struct {
 	IP   string
 	Port string
 }
 
-// EndpointPodMap is a map from network endpoint to a namespaced name of a pod
-type EndpointPodMap map[NetworkEndpoint]types.NamespacedName
+// TargetPodMap is a map from targets to a namespaced name of a pod
+type TargetPodMap map[Target]types.NamespacedName
 
 // Reflector defines the interaction between readiness reflector and other Target controller components
 type Reflector interface {
@@ -38,20 +39,28 @@ type Reflector interface {
 	// CommitPods signals the reflector that pods has been added to a TG and it is time to poll the Target health status
 	// syncerKey is the key to uniquely identify the Target syncer
 	// tgArn is the ARN of the load target group
-	// endpointMap contains mapping from all network endpoints to pods which have been added into the NEG
-	CommitPods(syncerKey TGSyncKey, tgArn string, endpointMap EndpointPodMap)
+	// targetMap contains mapping from all network targets to pods which have been added into the NEG
+	CommitPods(syncerKey TGSyncerKey, tgArn string, targetMap TargetPodMap)
 }
 
 // TGLookup defines an interface for looking up pod membership.
 type TGLookup interface {
+	// ReadinessGateEnabledTGs returns a list of targetgroups which has readiness gate
+	// enabled for the pod's namespace and labels.
+	ReadinessGateEnabledTGs(namespace string, labels map[string]string) []string
+
 	// ReadinessGateEnabled returns true if the Pod requires readiness feedback
-	ReadinessGateEnabled(syncerKey TGSyncKey) bool
+	ReadinessGateEnabled(syncerKey TGSyncerKey) bool
 }
 
+// NoopReflector is a mock reflector implementation
 type NoopReflector struct{}
 
+// Run is part of a mock implementation of the Reflector
 func (*NoopReflector) Run(<-chan struct{}) {}
 
+// SyncPod is part of a mock implementation of the Reflector
 func (*NoopReflector) SyncPod(*v1.Pod) {}
 
-func (*NoopReflector) CommitPods(TGSyncKey, string, string, EndpointPodMap) {}
+// CommitPods is part of a mock implementation of the Reflector
+func (*NoopReflector) CommitPods(TGSyncerKey, string, string, TargetPodMap) {}

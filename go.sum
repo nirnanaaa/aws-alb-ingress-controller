@@ -428,6 +428,7 @@ k8s.io/client-go v0.0.0-20181213151034-8d9ed539ba31 h1:OH3z6khCtxnJBAc0C5CMYWLl1
 k8s.io/client-go v0.0.0-20181213151034-8d9ed539ba31/go.mod h1:7vJpHMYJwNQCWgzmNV+VYUl1zCObLyodBc8nIyt8L5s=
 k8s.io/klog v0.2.0 h1:0ElL0OHzF3N+OhoJTL0uca20SxtYt4X4+bzHeqrB83c=
 k8s.io/klog v0.2.0/go.mod h1:Gq+BEi5rUBO/HRz0bTSXDUcqjScdoY3a9IHpCEIOOfk=
+k8s.io/klog v1.0.0 h1:Pt+yjF5aB1xDSVbau4VsWe+dQNzA0qv1LlXdC2dF6Q8=
 k8s.io/kube-openapi v0.0.0-20190208205540-d7c86cdc46e3 h1:exy9uNfm+xG+9rQsfPhmJQt+l/Pufd86hB9T/QrHeR4=
 k8s.io/kube-openapi v0.0.0-20190208205540-d7c86cdc46e3/go.mod h1:BXM9ceUBTj2QnfH2MK1odQs778ajze1RxcmP6S8RVVc=
 mvdan.cc/interfacer v0.0.0-20180901003855-c20040233aed h1:WX1yoOaKQfddO/mLzdV4wptyWgoH/6hwLs7QHTixo0I=

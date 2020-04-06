@@ -2,6 +2,7 @@ package tg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -77,9 +79,13 @@ type targetHealthController struct {
 func (c *targetHealthController) SyncTargetsForReconciliation(ctx context.Context, t *Targets, desiredTargets []*elbv2.TargetDescription) error {
 	conditionType := podConditionTypeForIngressBackend(t.Ingress, t.Backend)
 
-	targetsToReconcile, err := c.filterTargetsNeedingReconciliation(conditionType, t, desiredTargets)
+	klog.Infof("targets / desired targets %+v \n\n\n %+v\n", t.Targets, desiredTargets)
+	targetsToReconcile, pods, err := c.filterTargetsNeedingReconciliation(conditionType, t, desiredTargets)
 	if err != nil {
 		return err
+	}
+	if len(t.Targets) != len(desiredTargets) {
+		return errors.New("ok")
 	}
 
 	// create, update or remove targetGroupWatch for this target group;
@@ -87,13 +93,16 @@ func (c *targetHealthController) SyncTargetsForReconciliation(ctx context.Contex
 	// while the targetGroupWatch exists, a go routine regularly monitors the target health of the targets in the target group and updates the pod condition status for the corresponding pods
 	tgWatch, ok := c.tgWatches[t.TgArn]
 	if ok {
+		klog.Infof("tg watch: %+v\n", tgWatch)
 		if len(targetsToReconcile) == 0 {
 			tgWatch.cancel()
 			delete(c.tgWatches, t.TgArn)
+			klog.Infof("if => return on targets to reconcile empty \n\n")
 			return nil
 		}
 	} else {
 		if len(targetsToReconcile) == 0 {
+			klog.Infof("else => return on targets to reconcile empty \n\n")
 			return nil
 		}
 
@@ -145,8 +154,7 @@ func (c *targetHealthController) RemovePodConditions(ctx context.Context, t *Tar
 
 // Background loop which keeps reconciling pod condition statuses for the given target groups until the given context is cancelled.
 func (c *targetHealthController) reconcilePodConditionsLoop(ctx context.Context, tgArn string, conditionType api.PodConditionType, tgWatch *targetGroupWatch) {
-	logger := albctx.GetLogger(ctx)
-	logger.Infof("Starting reconciliation of pod condition status for target group: %v", tgArn)
+	klog.Infof("Starting reconciliation of pod condition status for target group: %v", tgArn)
 
 	var interval int64
 	var targetsToReconcile []*elbv2.TargetDescription
@@ -166,12 +174,12 @@ func (c *targetHealthController) reconcilePodConditionsLoop(ctx context.Context,
 			if err == nil {
 				targetsToReconcile = notReadyTargets
 			} else {
-				logger.Errorf("Failed to reconcile pod condition status: %v", err)
+				klog.Errorf("Failed to reconcile pod condition status: %v", err)
 				albctx.GetEventf(ctx)(api.EventTypeWarning, "ERROR", "Error reconciling pod condition status via target group %s: %s", tgArn, err.Error())
 			}
 
 		case <-ctx.Done():
-			logger.Infof("Stopping reconciliation of pod condition status for target group: %v", tgArn)
+			klog.Infof("Stopping reconciliation of pod condition status for target group: %v", tgArn)
 			return
 		}
 	}

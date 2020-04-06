@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	extensions "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/klog"
 )
 
 const (
@@ -85,21 +86,26 @@ func (resolver *endpointResolver) ReverseResolve(ingress *extensions.Ingress, ba
 		for _, epPort := range epSubset.Ports {
 			// servicePort.Name is optional if there is only one port
 			if servicePort.Name != "" && servicePort.Name != epPort.Name {
+				klog.Infof("no service port name")
 				continue
 			}
 			for _, epAddr := range append(epSubset.Addresses, epSubset.NotReadyAddresses...) {
 				if epAddr.TargetRef == nil || epAddr.TargetRef.Kind != "Pod" {
+					klog.Infof("no target ref")
 					continue
 				}
 
 				podKey := ingress.Namespace + "/" + epAddr.TargetRef.Name
 				pod, err := resolver.store.GetPod(podKey)
 				if err != nil {
+					klog.Infof("no such pod")
 					continue
 				}
 
 				if i, ok := targetsMap[pod.Status.PodIP]; ok {
 					result[i] = pod
+				} else {
+					klog.Infof("no such pod in map")
 				}
 			}
 		}
